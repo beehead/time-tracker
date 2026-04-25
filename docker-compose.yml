@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  time-tracker-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: time-tracker-bot
+    
+    # Переменные окружения
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      PYTHONUNBUFFERED: 1
+    
+    # Том для сохранения данных между перезагрузками
+    volumes:
+      - ./data:/app/data
+    
+    # Автоматический перезапуск при сбое
+    restart: unless-stopped
+    
+    # Логирование
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

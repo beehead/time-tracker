@@ -1,0 +1,50 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.Python
+
+# Environment
+.env
+.env.local
+.env.*.example
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.DS_Store
+
+# Логи и данные
+*.log
+data/time_tracker.db
+data/*.db
+
+# Тесты
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose.yml
+.docker/
+
+# Другое
+.github/
+.gitlab-ci.yml
+*.md
+docs/
