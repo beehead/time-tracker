@@ -5,10 +5,12 @@
 ### Установка Docker и Docker Compose
 
 **macOS/Windows:**
+
 - Установите [Docker Desktop](https://www.docker.com/products/docker-desktop)
 - Docker Compose включен в Docker Desktop
 
 **Linux:**
+
 ```bash
 # Установка Docker
 sudo apt-get install docker.io
@@ -21,27 +23,32 @@ sudo chmod +x /usr/local/bin/docker-compose
 ### Запуск бота
 
 1. **Создайте `.env` файл:**
+
    ```bash
    cp .env.docker.example .env
    ```
 
 2. **Добавьте токен в `.env`:**
+
    ```bash
    # Отредактируйте .env и добавьте:
    TELEGRAM_BOT_TOKEN=ваш_токен_от_BotFather
    ```
 
 3. **Запустите контейнер:**
+
    ```bash
    docker-compose up -d
    ```
 
 4. **Проверьте логи:**
+
    ```bash
    docker-compose logs -f time-tracker-bot
    ```
 
 5. **Остановка:**
+
    ```bash
    docker-compose down
    ```
@@ -106,9 +113,9 @@ docker logs -f time-tracker-bot
 
 ## Переменные окружения
 
-| Переменная | Обязательна | Описание |
-|------------|-----------|---------|
-| `TELEGRAM_BOT_TOKEN` | ✅ Да | Токен бота от @BotFather |
+| Переменная             | Обязательна | Описание                        |
+|------------------------|-------------|--------------------------------|
+| `TELEGRAM_BOT_TOKEN`   | ✅ Да      | Токен бота от @BotFather       |
 
 ---
 

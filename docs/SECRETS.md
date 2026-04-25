@@ -11,14 +11,15 @@
 
 ### 1. Локальные переменные окружения (`.env` файл)
 
-**Для разработки и тестирования**
+#### Для разработки и тестирования
 
 ```bash
 # .env (создать вручную, не коммитить!)
 TELEGRAM_BOT_TOKEN=123456789:ABCDefGhIjKlMnOpQrStUvWxYz1234567890
 ```
 
-**Загрузка в Python:**
+#### Загрузка в Python
+
 ```python
 import os
 from dotenv import load_dotenv
@@ -27,18 +28,22 @@ load_dotenv()
 token = os.getenv("TELEGRAM_BOT_TOKEN")
 ```
 
+#### Преимущества и недостатки
+
 **Преимущества:**
+
 - ✅ Просто для локальной разработки
 - ✅ Работает с `python-dotenv`
 
 **Недостатки:**
+
 - ❌ Опасно для production
 - ❌ Легко случайно закоммитить
 - ❌ Неудобно для teamwork
 
 ### 2. Системные переменные окружения
 
-**Для production серверов (Linux/macOS)**
+#### Для production серверов (Linux/macOS)
 
 ```bash
 # На сервере
@@ -55,6 +60,7 @@ Environment="TELEGRAM_BOT_TOKEN=ваш_токен"
 ### 3. Менеджеры секретов (для production)
 
 #### AWS Secrets Manager
+
 ```python
 import boto3
 client = boto3.client('secretsmanager')
@@ -63,6 +69,7 @@ token = secret['SecretString']
 ```
 
 #### HashiCorp Vault
+
 ```python
 import hvac
 client = hvac.Client(url='http://127.0.0.1:8200')
@@ -70,6 +77,7 @@ token = client.secrets.kv.read_secret_version(path='telegram_bot')
 ```
 
 #### GitHub Secrets (для CI/CD)
+
 ```yaml
 # .github/workflows/deploy.yml
 env:
@@ -86,7 +94,7 @@ TELEGRAM_BOT_TOKEN=my_personal_token_for_testing
 
 ## Структура файлов
 
-```
+```bash
 project/
 ├── .env.example          # ✅ КОММИТЬТЕ (шаблон без значений)
 ├── .env                  # ❌ НЕ КОММИТЬТЕ (реальные секреты)
@@ -95,7 +103,7 @@ project/
 └── .env.production       # ❌ ТОЛЬКО НА СЕРВЕРЕ
 ```
 
-### Проверка `.gitignore`
+## Проверка `.gitignore`
 
 ```bash
 # Проверить, что .env не отслеживается
