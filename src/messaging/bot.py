@@ -13,18 +13,28 @@ Telegram Bot для учёта времени с использованием po
 
 import requests
 import time
+import logging
 from datetime import datetime
+from typing import Optional, Dict
 from src.models.activity import Activity, ActivityType
 from src.database.db import DB_PATH
 from src.config import TELEGRAM_TOKEN
 import sqlite3
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 # Настройки Telegram API
 API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 # Хранилище текущих активностей по пользователям
 # Формат: { user_id: Activity }
-current_activities = {}
+current_activities: Dict[int, Activity] = {}
 
 # Соответствие текста и типа активности
 type_mapping = {
@@ -37,16 +47,28 @@ type_mapping = {
 }
 
 
-def send_message(chat_id: int, text: str):
-    """Отправка сообщения в чат."""
-    response = requests.post(
-        f"{API_URL}/sendMessage",
-        json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
-    )
-    if not response.ok:
-        print(f"❌ Ошибка отправки: {response.text}")
-    else:
-        print(f"✅ Сообщение отправлено в чат {chat_id}")
+def send_message(chat_id: int, text: str, retry_count: int = 3) -> bool:
+    """Отправка сообщения в чат с retry-логикой."""
+    for attempt in range(retry_count):
+        try:
+            response = requests.post(
+                f"{API_URL}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+                timeout=10
+            )
+            if response.ok:
+                logger.info(f"✅ Сообщение отправлено в чат {chat_id}")
+                return True
+            else:
+                logger.error(f"❌ Ошибка отправки (попытка {attempt + 1}/{retry_count}): {response.text}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"⚠️ Сетевая ошибка (попытка {attempt + 1}/{retry_count}): {e}")
+        
+        if attempt < retry_count - 1:
+            time.sleep(2 ** attempt)  # Экспоненциальная задержка
+    
+    logger.error(f"❌ Не удалось отправить сообщение после {retry_count} попыток")
+    return False
 
 
 def handle_message(chat_id: int, user_id: int, text: str):
@@ -80,7 +102,15 @@ def handle_message(chat_id: int, user_id: int, text: str):
         activity_type = ActivityType.PRODUCTIVE
         if len(parts) > 1:
             type_text = parts[1].lower()
-            activity_type = type_mapping.get(type_text, ActivityType.PRODUCTIVE)
+            if type_text not in type_mapping:
+                valid_types = ", ".join(type_mapping.keys())
+                send_message(
+                    chat_id,
+                    f"❌ Неизвестный тип '{type_text}'.\n"
+                    f"Допустимые типы: {valid_types}"
+                )
+                return
+            activity_type = type_mapping[type_text]
         
         # Останавливаем предыдущую активность, если есть
         if user_id in current_activities:
@@ -90,6 +120,10 @@ def handle_message(chat_id: int, user_id: int, text: str):
         # Создаём новую
         activity = Activity(name=name, activity_type=activity_type)
         current_activities[user_id] = activity
+        
+        # Сохраняем в БД как активную сессию
+        save_active_activity_to_db(user_id, activity)
+        
         send_message(
             chat_id,
             f"▶️ Активность начата: <b>{activity.name}</b> ({activity.activity_type.value})\n"
@@ -98,13 +132,27 @@ def handle_message(chat_id: int, user_id: int, text: str):
     
     elif text == "/stop_activity":
         if user_id not in current_activities:
-            send_message(chat_id, "❌ Нет активной активности.")
+            # Проверяем, есть ли активная активность в БД (на случай рестарта)
+            active_from_db = get_active_activity_from_db(user_id)
+            if active_from_db:
+                # Восстанавливаем из БД в память
+                current_activities[user_id] = active_from_db
+                send_message(chat_id, "🔄 Найдена активная активность после рестарта. Останавливаю...")
+                stop_current_activity(user_id, chat_id)
+            else:
+                send_message(chat_id, "❌ Нет активной активности.")
         else:
             stop_current_activity(user_id, chat_id)
     
     elif text == "/status":
-        if user_id in current_activities:
-            act = current_activities[user_id]
+        # Сначала проверяем память, потом БД
+        act = current_activities.get(user_id)
+        if not act:
+            act = get_active_activity_from_db(user_id)
+            if act:
+                current_activities[user_id] = act
+        
+        if act:
             duration = (datetime.now() - act.start_time).total_seconds()
             send_message(
                 chat_id,
@@ -131,25 +179,12 @@ def stop_current_activity(user_id: int, chat_id: int):
     
     # Сохранение в БД
     try:
-        with sqlite3.connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO activities (name, type, start_time, end_time, description) VALUES (?, ?, ?, ?, ?)",
-                (
-                    activity.name,
-                    activity.activity_type.value,
-                    activity.start_time.isoformat(),
-                    activity.end_time.isoformat(),
-                    activity.description
-                )
-            )
-            activity_id = cursor.lastrowid
-            # Создаём временной слот
-            cursor.execute(
-                "INSERT INTO time_slots (start_time, end_time, activity_id) VALUES (?, ?, ?)",
-                (activity.start_time.isoformat(), activity.end_time.isoformat(), activity_id)
-            )
-            conn.commit()
+        from src.database.db import save_activity_to_db, delete_active_activity_from_db
+        
+        activity_id = save_activity_to_db(activity)
+        
+        # Удаляем активную сессию из БД
+        delete_active_activity_from_db(user_id)
         
         duration_seconds = activity.duration
         minutes = int(duration_seconds // 60)
@@ -160,7 +195,26 @@ def stop_current_activity(user_id: int, chat_id: int):
             f"Длительность: {minutes}м {seconds}с"
         )
     except Exception as e:
+        logger.error(f"❌ Ошибка сохранения активности: {e}")
         send_message(chat_id, f"❌ Ошибка сохранения: {e}")
+
+
+def get_active_activity_from_db(user_id: int) -> Optional[Activity]:
+    """Получает активную активность пользователя из БД."""
+    from src.database.db import get_active_activity_from_db as db_get_active
+    return db_get_active(user_id)
+
+
+def save_active_activity_to_db(user_id: int, activity: Activity):
+    """Сохраняет активную сессию в БД для восстановления после рестарта."""
+    from src.database.db import save_active_activity_to_db as db_save_active
+    db_save_active(user_id, activity)
+
+
+def delete_active_activity_from_db(user_id: int):
+    """Удаляет активную сессию из БД."""
+    from src.database.db import delete_active_activity_from_db as db_delete_active
+    db_delete_active(user_id)
 
 
 def export_data(chat_id: int):
@@ -199,27 +253,36 @@ def export_data(chat_id: int):
         send_message(chat_id, f"❌ Ошибка экспорта: {e}")
 
 
-def get_updates(offset=0):
-    """Получить обновления от Telegram."""
-    try:
-        response = requests.get(
-            f"{API_URL}/getUpdates",
-            params={"offset": offset, "timeout": 30}
-        )
-        if response.ok:
-            return response.json()["result"]
-        else:
-            print(f"❌ Ошибка getUpdates: {response.text}")
-            return []
-    except Exception as e:
-        print(f"❌ Ошибка подключения: {e}")
-        return []
+def get_updates(offset: int = 0, timeout: int = 30) -> list:
+    """Получить обновления от Telegram с retry-логикой."""
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(
+                f"{API_URL}/getUpdates",
+                params={"offset": offset, "timeout": timeout},
+                timeout=timeout + 5
+            )
+            if response.ok:
+                return response.json().get("result", [])
+            else:
+                logger.error(f"❌ Ошибка getUpdates (попытка {attempt + 1}/{max_retries}): {response.text}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"⚠️ Сетевая ошибка getUpdates (попытка {attempt + 1}/{max_retries}): {e}")
+        
+        if attempt < max_retries - 1:
+            time.sleep(2 ** attempt)
+    
+    return []
 
 
 def start_bot():
     """Запуск бота с использованием polling."""
-    print("🤖 Бот запущен. Ожидание сообщений...")
+    logger.info("🤖 Бот запущен. Ожидание сообщений...")
     offset = 0
+    
+    # Загружаем активные сессии из БД при старте
+    load_active_sessions_from_db()
     
     try:
         while True:
@@ -232,20 +295,31 @@ def start_bot():
                     user_id = message["from"]["id"]
                     text = message.get("text", "")
                     
-                    print(f"📨 [{user_id}] {text}")
+                    logger.info(f"📨 [{user_id}] {text}")
                     handle_message(chat_id, user_id, text)
                 
-                # Обновляем offset для следующей итерации
+                # КРИТИЧЕСКИ ВАЖНО: обновляем offset для следующей итерации
+                # Это предотвращает потерю сообщений
                 offset = update["update_id"] + 1
             
             # Небольшая задержка чтобы не перегружать API
             time.sleep(0.1)
     
     except KeyboardInterrupt:
-        print("\n👋 Бот остановлен.")
+        logger.info("\n👋 Бот остановлен пользователем.")
     except Exception as e:
-        print(f"❌ Ошибка в основном цикле: {e}")
+        logger.error(f"❌ Критическая ошибка в основном цикле: {e}", exc_info=True)
         raise
+
+
+def load_active_sessions_from_db():
+    """Загружает все активные сессии из БД при старте бота."""
+    from src.database.db import get_all_active_sessions
+    
+    sessions = get_all_active_sessions()
+    for user_id, activity in sessions:
+        current_activities[user_id] = activity
+        logger.info(f"🔄 Восстановлена активная сессия для пользователя {user_id}: {activity.name}")
 
 
 # Для запуска: python -m src.main
