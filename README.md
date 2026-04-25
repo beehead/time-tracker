@@ -59,7 +59,7 @@ src/
    # Отредактируйте .env и добавьте:
    TELEGRAM_BOT_TOKEN=ваш_токен_от_BotFather
    ```
-   
+
    > 📝 **Как получить токен:**
    > 1. Напишите @BotFather в Telegram
    > 2. Выполните команду /newbot

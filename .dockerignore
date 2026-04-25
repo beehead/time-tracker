@@ -1,3 +1,5 @@
+# Docker build context ignore patterns
+
 # Git
 .git
 .gitignore
