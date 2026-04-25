@@ -1,13 +1,28 @@
-__pycache__/
+```
+# Compiled and build artifacts
 *.pyc
-.DS_Store
+__pycache__/
+*.o
+*.obj
+dist/
+build/
+
+# Dependencies
+.venv/
+venv/
+node_modules/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
 .env
 .env.local
-# Исключаем базу данных
-/data/
-# Исключаем логи
-*.log
-# Исключаем виртуальное окружение
-venv/
-env/
-ENV/
+.env.*
+
+# Editors
+.vscode/
+.idea/
+```
