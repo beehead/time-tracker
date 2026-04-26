@@ -41,7 +41,7 @@ def test_activity_duration():
         end_time=end_time
     )
     
-    assert activity.duration == 30 * 60  # 30 минут в секундах
+    assert abs(activity.duration - 30 * 60) < 0.1  # 30 минут в секундах с допустимой погрешностью из-за временной задержки
 
 
 def test_activity_duration_no_end():

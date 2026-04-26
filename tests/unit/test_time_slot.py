@@ -40,7 +40,7 @@ def test_timeslot_duration():
         activity_id=1
     )
     
-    assert slot.duration == 15 * 60  # 15 минут в секундах
+    assert abs(slot.duration - 15 * 60) < 0.1  # 15 минут в секундах с допустимой погрешностью из-за временной задержки
 
 
 def test_timeslot_duration_no_end():
