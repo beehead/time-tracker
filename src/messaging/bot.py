@@ -17,7 +17,7 @@ import logging
 from datetime import datetime
 from typing import Optional, Dict
 from src.models.activity import Activity, ActivityType
-from src.database.db import DB_PATH
+from src.database.db import DB_PATH, DatabaseError
 from src.config import TELEGRAM_TOKEN
 import sqlite3
 
@@ -194,9 +194,16 @@ def stop_current_activity(user_id: int, chat_id: int):
             f"✅ Активность сохранена (ID: {activity_id})\n"
             f"Длительность: {minutes}м {seconds}с"
         )
+    except DatabaseError as e:
+        logger.error(f"❌ Database error saving activity: {e}")
+        send_message(chat_id, "❌ Ошибка базы данных. Попробуйте позже.")
+        # Restore the activity in memory since saving failed
+        current_activities[user_id] = activity
     except Exception as e:
-        logger.error(f"❌ Ошибка сохранения активности: {e}")
-        send_message(chat_id, f"❌ Ошибка сохранения: {e}")
+        logger.error(f"❌ Unexpected error saving activity: {e}")
+        send_message(chat_id, f"❌ Неожиданная ошибка: {e}")
+        # Restore the activity in memory since saving failed
+        current_activities[user_id] = activity
 
 
 def get_active_activity_from_db(user_id: int) -> Optional[Activity]:
@@ -207,14 +214,22 @@ def get_active_activity_from_db(user_id: int) -> Optional[Activity]:
 
 def save_active_activity_to_db(user_id: int, activity: Activity):
     """Сохраняет активную сессию в БД для восстановления после рестарта."""
-    from src.database.db import save_active_activity_to_db as db_save_active
-    db_save_active(user_id, activity)
+    try:
+        from src.database.db import save_active_activity_to_db as db_save_active
+        db_save_active(user_id, activity)
+    except DatabaseError as e:
+        logger.error(f"Failed to save active session for user {user_id}: {e}")
+        raise
 
 
 def delete_active_activity_from_db(user_id: int):
     """Удаляет активную сессию из БД."""
-    from src.database.db import delete_active_activity_from_db as db_delete_active
-    db_delete_active(user_id)
+    try:
+        from src.database.db import delete_active_activity_from_db as db_delete_active
+        db_delete_active(user_id)
+    except DatabaseError as e:
+        logger.error(f"Failed to delete active session for user {user_id}: {e}")
+        raise
 
 
 def export_data(chat_id: int):
@@ -314,12 +329,19 @@ def start_bot():
 
 def load_active_sessions_from_db():
     """Загружает все активные сессии из БД при старте бота."""
-    from src.database.db import get_all_active_sessions
-    
-    sessions = get_all_active_sessions()
-    for user_id, activity in sessions:
-        current_activities[user_id] = activity
-        logger.info(f"🔄 Восстановлена активная сессия для пользователя {user_id}: {activity.name}")
+    try:
+        from src.database.db import get_all_active_sessions
+        
+        sessions = get_all_active_sessions()
+        for user_id, activity in sessions:
+            current_activities[user_id] = activity
+            logger.info(f"🔄 Восстановлена активная сессия для пользователя {user_id}: {activity.name}")
+    except DatabaseError as e:
+        logger.error(f"Failed to load active sessions from database: {e}")
+        logger.warning("Bot will start without loading previous active sessions")
+    except Exception as e:
+        logger.error(f"Unexpected error loading active sessions: {e}")
+        logger.warning("Bot will start without loading previous active sessions")
 
 
 # Для запуска: python -m src.main

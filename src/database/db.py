@@ -6,13 +6,31 @@ import sqlite3
 import os
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.models.activity import Activity
+
+
+class DatabaseError(Exception):
+    """Базовое исключение для ошибок базы данных."""
+    pass
+
+
+class ActivityNotFoundError(DatabaseError):
+    """Исключение для случаев, когда активность не найдена."""
+    pass
+
+
+class DatabaseConnectionError(DatabaseError):
+    """Исключение для ошибок подключения к базе данных."""
+    pass
 
 # Путь к базе данных
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "time_tracker.db"
 
 
-def init_db():
+def init_db() -> None:
     """Создаёт таблицы, если они не существуют."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     
@@ -57,10 +75,11 @@ def init_db():
     print(f"База данных инициализирована: {DB_PATH}")
 
 
-def save_activity_to_db(activity) -> int:
+def save_activity_to_db(activity: "Activity") -> int:
     """Сохраняет завершённую активность в БД."""
     try:
         with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("BEGIN TRANSACTION")
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO activities (name, type, start_time, end_time, description) VALUES (?, ?, ?, ?, ?)",
@@ -83,11 +102,12 @@ def save_activity_to_db(activity) -> int:
             
             conn.commit()
             return activity_id
-    except Exception as e:
-        raise Exception(f"Ошибка сохранения активности: {e}")
+    except sqlite3.Error as e:
+        conn.rollback()
+        raise DatabaseError(f"Failed to save activity '{activity.name}': {e}") from e
 
 
-def get_active_activity_from_db(user_id: int):
+def get_active_activity_from_db(user_id: int) -> Optional["Activity"]:
     """Получает активную активность пользователя из БД."""
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -109,13 +129,17 @@ def get_active_activity_from_db(user_id: int):
                     start_time=datetime.fromisoformat(row['start_time']),
                     description=description
                 )
-    except Exception as e:
-        print(f"Ошибка получения активной сессии: {e}")
+    except sqlite3.Error as e:
+        # Log the error but don't raise - return None for missing active sessions
+        print(f"Database error getting active session for user {user_id}: {e}")
+    except (ValueError, KeyError) as e:
+        # Handle invalid data in database
+        print(f"Data error in active session for user {user_id}: {e}")
     
     return None
 
 
-def save_active_activity_to_db(user_id: int, activity):
+def save_active_activity_to_db(user_id: int, activity: "Activity") -> None:
     """Сохраняет активную сессию в БД для восстановления после рестарта."""
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -132,22 +156,22 @@ def save_active_activity_to_db(user_id: int, activity):
                 )
             )
             conn.commit()
-    except Exception as e:
-        print(f"Ошибка сохранения активной сессии: {e}")
+    except sqlite3.Error as e:
+        raise DatabaseError(f"Failed to save active session for user {user_id}: {e}") from e
 
 
-def delete_active_activity_from_db(user_id: int):
+def delete_active_activity_from_db(user_id: int) -> None:
     """Удаляет активную сессию из БД."""
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM active_sessions WHERE user_id = ?", (user_id,))
             conn.commit()
-    except Exception as e:
-        print(f"Ошибка удаления активной сессии: {e}")
+    except sqlite3.Error as e:
+        raise DatabaseError(f"Failed to delete active session for user {user_id}: {e}") from e
 
 
-def get_all_active_sessions() -> List:
+def get_all_active_sessions() -> List[Tuple[int, "Activity"]]:
     """Получает все активные сессии из БД."""
     from src.models.activity import Activity, ActivityType
     
@@ -170,7 +194,11 @@ def get_all_active_sessions() -> List:
                     description=description
                 )
                 sessions.append((row['user_id'], activity))
-    except Exception as e:
-        print(f"Ошибка загрузки активных сессий: {e}")
+    except sqlite3.Error as e:
+        print(f"Database error loading active sessions: {e}")
+        raise DatabaseError(f"Failed to load active sessions: {e}") from e
+    except (ValueError, KeyError) as e:
+        print(f"Data error in active sessions: {e}")
+        raise DatabaseError(f"Invalid data in active sessions: {e}") from e
     
     return sessions
