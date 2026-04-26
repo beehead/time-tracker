@@ -14,7 +14,7 @@ Telegram Bot для учёта времени с использованием po
 import logging
 import sqlite3
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional
 
 import requests
@@ -37,6 +37,10 @@ API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 # Хранилище текущих активностей по пользователям
 # Формат: { user_id: Activity }
 current_activities: Dict[int, Activity] = {}
+
+# Хранилище сессий добавления прошедших событий
+# Формат: { user_id: {"name": str, "type": ActivityType, "start_time": datetime} }
+past_activity_sessions: Dict[int, dict] = {}
 
 # Соответствие текста и типа активности
 type_mapping = {
@@ -77,9 +81,76 @@ def send_message(chat_id: int, text: str, retry_count: int = 3) -> bool:
     return False
 
 
+def parse_time(time_str: str) -> Optional[datetime]:
+    """Парсит строку времени в формате HH:MM или HH:MM:SS."""
+    formats = ["%H:%M:%S", "%H:%M"]
+    for fmt in formats:
+        try:
+            time_obj = datetime.strptime(time_str, fmt).time()
+            # Объединяем с сегодняшней датой
+            today = datetime.now().date()
+            return datetime.combine(today, time_obj)
+        except ValueError:
+            continue
+    return None
+
+
+def parse_duration(duration_str: str) -> Optional[timedelta]:
+    """
+    Парсит строку длительности в формате:
+    - "30m" или "30 минут" (минуты)
+    - "1h" или "1 час" (часы)
+    - "1h 30m" (часы и минуты)
+    """
+    duration_str = duration_str.strip().lower()
+    
+    # Нормализуем разделители
+    duration_str = duration_str.replace("часов", "h").replace("час", "h")
+    duration_str = duration_str.replace("минут", "m").replace("минуты", "m").replace("минута", "m")
+    
+    total_seconds = 0
+    
+    # Парсим часы
+    if 'h' in duration_str:
+        try:
+            hours_part = duration_str.split('h')[0].strip()
+            hours = int(hours_part)
+            total_seconds += hours * 3600
+            duration_str = duration_str.split('h')[1]
+        except (ValueError, IndexError):
+            return None
+    
+    # Парсим минуты
+    if 'm' in duration_str:
+        try:
+            minutes_part = duration_str.split('m')[0].strip()
+            if minutes_part:
+                minutes = int(minutes_part)
+                total_seconds += minutes * 60
+        except ValueError:
+            return None
+    elif 'm' not in duration_str and total_seconds == 0:
+        # Если только число без единицы - считаем за минуты
+        try:
+            minutes = int(duration_str.strip())
+            total_seconds = minutes * 60
+        except ValueError:
+            return None
+    
+    if total_seconds <= 0:
+        return None
+    
+    return timedelta(seconds=total_seconds)
+
+
 def handle_message(chat_id: int, user_id: int, text: str):
     """Обработка входящего сообщения."""
     text = text.strip()
+
+    # Проверяем, находится ли пользователь в процессе добавления прошедшего события
+    if user_id in past_activity_sessions:
+        handle_past_activity_input(chat_id, user_id, text)
+        return
 
     if text == "/start":
         send_message(
@@ -89,6 +160,7 @@ def handle_message(chat_id: int, user_id: int, text: str):
             "/start_activity &lt;название&gt; [тип] — начать активность\n"
             "/stop_activity — остановить\n"
             "/status — текущая активность\n"
+            "/add_past &lt;название&gt; [тип] — добавить прошедшее событие\n"
             "/export — экспорт всех данных\n\n"
             "<b>Типы активности:</b>\n"
             "продуктивная, инвестиционная, лишняя, отдых, дом, техобслуживание"
@@ -137,6 +209,44 @@ def handle_message(chat_id: int, user_id: int, text: str):
             f"Время: {activity.start_time.strftime('%H:%M:%S')}"
         )
 
+    elif text.startswith("/add_past"):
+        parts = text[len("/add_past"):].strip().split(" ", 1)
+        if not parts or not parts[0]:
+            send_message(
+                chat_id,
+                "❌ Использование: /add_past &lt;название&gt; [тип]\n"
+                "Типы: продуктивная, инвестиционная, лишняя, отдых, дом, техобслуживание"
+            )
+            return
+
+        name = parts[0]
+        activity_type = ActivityType.PRODUCTIVE
+        if len(parts) > 1:
+            type_text = parts[1].lower()
+            if type_text not in type_mapping:
+                valid_types = ", ".join(type_mapping.keys())
+                send_message(
+                    chat_id,
+                    f"❌ Неизвестный тип '{type_text}'.\n"
+                    f"Допустимые типы: {valid_types}"
+                )
+                return
+            activity_type = type_mapping[type_text]
+
+        # Инициализируем сессию добавления прошедшего события
+        past_activity_sessions[user_id] = {
+            "name": name,
+            "type": activity_type,
+            "start_time": None,
+            "duration": None
+        }
+
+        send_message(
+            chat_id,
+            f"⏰ Добавляю прошедшее событие: <b>{name}</b> ({activity_type.value})\n\n"
+            f"Укажите время начала события (формат HH:MM или HH:MM:SS):"
+        )
+
     elif text == "/stop_activity":
         if user_id not in current_activities:
             # Проверяем, есть ли активная активность в БД (на случай рестарта)
@@ -175,8 +285,104 @@ def handle_message(chat_id: int, user_id: int, text: str):
     elif text == "/export":
         export_data(chat_id)
 
+    elif text == "/cancel":
+        if user_id in past_activity_sessions:
+            del past_activity_sessions[user_id]
+            send_message(chat_id, "❌ Отмена добавления прошедшего события.")
+        else:
+            send_message(chat_id, "❓ Нечего отменять.")
+
     else:
         send_message(chat_id, "❓ Неизвестная команда. Введи /start для справки.")
+
+
+def handle_past_activity_input(chat_id: int, user_id: int, text: str):
+    """Обработка ввода при добавлении прошедшего события."""
+    session = past_activity_sessions[user_id]
+    text = text.strip()
+
+    if text == "/cancel":
+        del past_activity_sessions[user_id]
+        send_message(chat_id, "❌ Отмена добавления прошедшего события.")
+        return
+
+    # Шаг 1: Запрашиваем время начала
+    if session["start_time"] is None:
+        start_time = parse_time(text)
+        if not start_time:
+            send_message(
+                chat_id,
+                "❌ Неправильный формат времени.\n"
+                "Используйте формат HH:MM или HH:MM:SS\n"
+                "Пример: 14:30 или 14:30:45"
+            )
+            return
+
+        session["start_time"] = start_time
+        send_message(
+            chat_id,
+            f"✅ Время начала: {start_time.strftime('%H:%M:%S')}\n\n"
+            f"Укажите длительность события:\n"
+            f"Форматы: 30m, 1h, 1h 30m, 90 минут"
+        )
+
+    # Шаг 2: Запрашиваем длительность
+    elif session["duration"] is None:
+        duration = parse_duration(text)
+        if not duration:
+            send_message(
+                chat_id,
+                "❌ Неправильный формат длительности.\n"
+                "Используйте:\n"
+                "• 30m (минуты)\n"
+                "• 1h (часы)\n"
+                "• 1h 30m (часы и минуты)\n"
+                "• 90 (минуты по умолчанию)"
+            )
+            return
+
+        session["duration"] = duration
+
+        # Сохраняем прошедшее событие в БД
+        save_past_activity(chat_id, user_id, session)
+        del past_activity_sessions[user_id]
+
+
+def save_past_activity(chat_id: int, user_id: int, session: dict):
+    """Сохраняет прошедшее событие в БД."""
+    try:
+        start_time = session["start_time"]
+        end_time = start_time + session["duration"]
+
+        activity = Activity(
+            name=session["name"],
+            activity_type=session["type"],
+            start_time=start_time,
+            end_time=end_time
+        )
+
+        from src.database.db import save_activity_to_db
+
+        activity_id = save_activity_to_db(activity)
+
+        duration_seconds = activity.duration
+        minutes = int(duration_seconds // 60)
+        seconds = int(duration_seconds % 60)
+
+        send_message(
+            chat_id,
+            f"✅ Прошедшее событие сохранено (ID: {activity_id})\n"
+            f"Название: {activity.name}\n"
+            f"Тип: {activity.activity_type.value}\n"
+            f"Время: {start_time.strftime('%H:%M:%S')} → {end_time.strftime('%H:%M:%S')}\n"
+            f"Длительность: {minutes}м {seconds}с"
+        )
+    except DatabaseError as e:
+        logger.error(f"❌ Database error saving past activity: {e}")
+        send_message(chat_id, "❌ Ошибка базы данных. Попробуйте позже.")
+    except Exception as e:
+        logger.error(f"❌ Unexpected error saving past activity: {e}")
+        send_message(chat_id, f"❌ Неожиданная ошибка: {e}")
 
 
 def stop_current_activity(user_id: int, chat_id: int):
