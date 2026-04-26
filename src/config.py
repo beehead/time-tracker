@@ -5,6 +5,7 @@
 
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Загружаем переменные из .env файла
@@ -14,10 +15,10 @@ load_dotenv(dotenv_path=env_path)
 
 class Config:
     """Базовая конфигурация."""
-    
+
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     DEBUG = os.getenv("DEBUG", "false").lower() == "true"
-    
+
     @classmethod
     def validate(cls):
         """Проверяет наличие обязательных переменных."""

@@ -5,6 +5,7 @@
 from datetime import datetime
 from typing import Optional
 
+
 class TimeSlot:
     def __init__(
         self,
@@ -28,4 +29,8 @@ class TimeSlot:
         return (self.end_time - self.start_time).total_seconds()
 
     def __repr__(self) -> str:
-        return f"<TimeSlot id={self.id} start={self.start_time} end={self.end_time} duration={self.duration}s activity_id={self.activity_id}>"
+        return (
+            f"<TimeSlot id={self.id} start={self.start_time} "
+            f"end={self.end_time} duration={self.duration}s "
+            f"activity_id={self.activity_id}>"
+        )

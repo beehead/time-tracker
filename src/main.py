@@ -7,7 +7,7 @@ def main():
     """Инициализация приложения и запуск бота."""
     from src.database.db import init_db
     from src.messaging.bot import start_bot
-    
+
     init_db()
     start_bot()
 

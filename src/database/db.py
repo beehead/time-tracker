@@ -3,10 +3,9 @@
 """
 
 import sqlite3
-import os
-from pathlib import Path
 from datetime import datetime
-from typing import Optional, List, Tuple, TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from src.models.activity import Activity
@@ -33,10 +32,10 @@ DB_PATH = Path(__file__).parent.parent.parent / "data" / "time_tracker.db"
 def init_db() -> None:
     """Создаёт таблицы, если они не существуют."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    
+
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        
+
         # Таблица активностей
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS activities (
@@ -47,7 +46,7 @@ def init_db() -> None:
             end_time TEXT,
             description TEXT
         )''')
-        
+
         # Таблица временных слотов
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS time_slots (
@@ -58,7 +57,7 @@ def init_db() -> None:
             description TEXT,
             FOREIGN KEY (activity_id) REFERENCES activities (id)
         )''')
-        
+
         # Таблица активных сессий (для восстановления после рестарта)
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS active_sessions (
@@ -69,9 +68,9 @@ def init_db() -> None:
             start_time TEXT NOT NULL,
             description TEXT
         )''')
-        
+
         conn.commit()
-    
+
     print(f"База данных инициализирована: {DB_PATH}")
 
 
@@ -82,7 +81,8 @@ def save_activity_to_db(activity: "Activity") -> int:
             conn.execute("BEGIN TRANSACTION")
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO activities (name, type, start_time, end_time, description) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO activities (name, type, start_time, end_time, description) "
+                "VALUES (?, ?, ?, ?, ?)",
                 (
                     activity.name,
                     activity.activity_type.value,
@@ -92,14 +92,15 @@ def save_activity_to_db(activity: "Activity") -> int:
                 )
             )
             activity_id = cursor.lastrowid
-            
+
             # Создаём временной слот
             if activity.end_time:
                 cursor.execute(
-                    "INSERT INTO time_slots (start_time, end_time, activity_id) VALUES (?, ?, ?)",
+                    "INSERT INTO time_slots (start_time, end_time, activity_id) "
+                    "VALUES (?, ?, ?)",
                     (activity.start_time.isoformat(), activity.end_time.isoformat(), activity_id)
                 )
-            
+
             conn.commit()
             return activity_id
     except sqlite3.Error as e:
@@ -118,7 +119,7 @@ def get_active_activity_from_db(user_id: int) -> Optional["Activity"]:
                 (user_id,)
             )
             row = cursor.fetchone()
-            
+
             if row:
                 from src.models.activity import Activity, ActivityType
                 description = row['description'] if row['description'] else None
@@ -135,7 +136,7 @@ def get_active_activity_from_db(user_id: int) -> Optional["Activity"]:
     except (ValueError, KeyError) as e:
         # Handle invalid data in database
         print(f"Data error in active session for user {user_id}: {e}")
-    
+
     return None
 
 
@@ -146,7 +147,8 @@ def save_active_activity_to_db(user_id: int, activity: "Activity") -> None:
             cursor = conn.cursor()
             # Используем REPLACE чтобы обновить существующую запись
             cursor.execute(
-                "REPLACE INTO active_sessions (user_id, name, type, start_time, description) VALUES (?, ?, ?, ?, ?)",
+                "REPLACE INTO active_sessions (user_id, name, type, start_time, description) "
+                "VALUES (?, ?, ?, ?, ?)",
                 (
                     user_id,
                     activity.name,
@@ -174,7 +176,7 @@ def delete_active_activity_from_db(user_id: int) -> None:
 def get_all_active_sessions() -> List[Tuple[int, "Activity"]]:
     """Получает все активные сессии из БД."""
     from src.models.activity import Activity, ActivityType
-    
+
     sessions = []
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -182,7 +184,7 @@ def get_all_active_sessions() -> List[Tuple[int, "Activity"]]:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM active_sessions")
             rows = cursor.fetchall()
-            
+
             for row in rows:
                 # sqlite3.Row поддерживает доступ по ключу через []
                 description = row['description'] if row['description'] else None
@@ -200,5 +202,5 @@ def get_all_active_sessions() -> List[Tuple[int, "Activity"]]:
     except (ValueError, KeyError) as e:
         print(f"Data error in active sessions: {e}")
         raise DatabaseError(f"Invalid data in active sessions: {e}") from e
-    
+
     return sessions

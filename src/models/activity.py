@@ -2,9 +2,10 @@
 Модель для описания акта работы или эпизода активности.
 """
 
-from enum import Enum
 from datetime import datetime
+from enum import Enum
 from typing import Optional
+
 
 class ActivityType(Enum):
     PRODUCTIVE = "productive"        # Продуктивная активность
@@ -40,4 +41,8 @@ class Activity:
         return (self.end_time - self.start_time).total_seconds()
 
     def __repr__(self) -> str:
-        return f"<Activity id={self.id} name='{self.name}' type={self.activity_type.value} start={self.start_time} end={self.end_time} duration={self.duration}s>"
+        return (
+            f"<Activity id={self.id} name='{self.name}' "
+            f"type={self.activity_type.value} start={self.start_time} "
+            f"end={self.end_time} duration={self.duration}s>"
+        )

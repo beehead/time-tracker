@@ -2,7 +2,6 @@
 Конфигурация pytest.
 """
 
-import pytest
 
 # Добавляем директорию src в sys.path для импорта
 import sys
